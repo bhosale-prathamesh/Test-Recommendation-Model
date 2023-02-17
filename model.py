@@ -1,11 +1,13 @@
+import os
 import pandas as pd
 import tensorflow as tf
 from typing import Dict, Text
 import numpy as np
 import tensorflow_recommenders as tfrs
 
-data = pd.read_csv('Electronics.csv',names=['ItemId','UserId','Rating','Timestamp'],nrows=100000)
+data = pd.read_csv('Electronics.csv',names=['ItemId','UserId','Rating','Timestamp'],nrows=1000000)
 item = pd.DataFrame(np.unique(data['ItemId']),columns=['ItemId'])
+
 data = tf.data.Dataset.from_tensor_slices(dict(data))
 item = tf.data.Dataset.from_tensor_slices(dict(item))
 
@@ -27,7 +29,7 @@ test = shuffled.skip(80_000).take(20_000)
 item_id = item.batch(1_000)
 user_ids = ratings.batch(1_000_000).map(lambda x: x["UserId"])
 
-unique_movie_titles = np.unique(np.concatenate(list(item_id)))
+unique_item_ids = np.unique(np.concatenate(list(item_id)))
 unique_user_ids = np.unique(np.concatenate(list(user_ids)))
 
 class MovielensModel(tfrs.models.Model):
@@ -43,8 +45,8 @@ class MovielensModel(tfrs.models.Model):
     # User and movie models.
     self.item_model: tf.keras.layers.Layer = tf.keras.Sequential([
       tf.keras.layers.experimental.preprocessing.StringLookup(
-        vocabulary=unique_movie_titles, mask_token=None),
-      tf.keras.layers.Embedding(len(unique_movie_titles) + 1, embedding_dimension)
+        vocabulary=unique_item_ids, mask_token=None),
+      tf.keras.layers.Embedding(len(unique_item_ids) + 1, embedding_dimension)
     ])
     self.user_model: tf.keras.layers.Layer = tf.keras.Sequential([
       tf.keras.layers.experimental.preprocessing.StringLookup(
@@ -109,7 +111,7 @@ class MovielensModel(tfrs.models.Model):
 
             + self.retrieval_weight * retrieval_loss)
 
-model = MovielensModel(rating_weight=1.0, retrieval_weight=0.0)
+model = MovielensModel(rating_weight=1.0, retrieval_weight=1.0)
 model.compile(optimizer=tf.keras.optimizers.Adagrad(0.1))
 
 print(model.layers)
@@ -120,9 +122,8 @@ cached_test = test.batch(4096).cache()
 model.fit(cached_train, epochs=3)
 
 index = tfrs.layers.factorized_top_k.BruteForce(model.user_model)
-
-index.index_from_dataset(candidates=item.batch(100).map(model.item_model))
-
-_, titles = index(tf.constant(["A1N070NS9CJQ2I"]))
-print(titles[0, :10])
-print(f"Recommendations for user A1N070NS9CJQ2I: {[list(item)[i] for i in titles[0, :10]]}")
+index = index.index_from_dataset(candidates=item.batch(100).map(lambda ItemId : (ItemId, model.item_model(ItemId))))
+path = os.path.join("D:\Githhub Projects\Test Recommendation Model\model_v0")
+_, titles = index(tf.constant(["42"]))
+print(titles)
+index.save(path,"model_v0")
